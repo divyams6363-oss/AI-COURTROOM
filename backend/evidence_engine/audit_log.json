@@ -1,3 +1,4 @@
+
 [
     {
         "record_id": "81ae438b-30bb-469f-abde-98d3f90fc9cb",
@@ -18,5 +19,15 @@
         "timestamp": "2026-11-25T10:41:27.606121+00:00",
         "previous_hash": "4761a30af196ed9ce66dd79cadf5acaa449f8e364a0062f98172fd445b73af55",
         "record_hash": "3c7ed9308625e6237fc1605542a97404062e1e31f218b3a66655d25d4845f0c1"
+    },
+    {
+        "record_id": "660bc541-106d-4b8d-bbae-91edb3466daf",
+        "evidence_id": "22e05013-208d-4c53-bc11-92e1b07663f5",
+        "action": "UPLOAD_AND_PROCESS",
+        "performed_by": "system",
+        "details": "Processed file: 9aea2e97c90e45be85cd6ea139ec36cc.txt",
+        "timestamp": "2026-11-25T13:37:50.518172+00:00",
+        "previous_hash": "3c7ed9308625e6237fc1605542a97404062e1e31f218b3a66655d25d4845f0c1",
+        "record_hash": "b1b64937565355fa9b7570125fb2972169dbc3fe8937101e978a67b8d47e33c9"
     }
 ]

@@ -13,6 +13,7 @@ from .graph import build_evidence_graph
 from .audit import record_activity, get_audit_history, verify_audit_log
 from .processor import process_evidence
 
+
 class TestEvidenceEngine(unittest.TestCase):
 
     def setUp(self):
@@ -75,7 +76,7 @@ class TestEvidenceEngine(unittest.TestCase):
         self.assertEqual(len(result["edges"]), 1)
 
     def test_audit_log(self):
-         with tempfile.TemporaryDirectory() as folder:
+        with tempfile.TemporaryDirectory() as folder:
             audit_path = Path(folder) / "audit.json"
             audit_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -91,7 +92,7 @@ class TestEvidenceEngine(unittest.TestCase):
             audit_path = Path(folder) / "audit.json"
             audit_path.parent.mkdir(parents=True, exist_ok=True)
 
-            with patch("evidence_engine.audit.AUDIT_FILE", audit_path): 
+            with patch("evidence_engine.audit.AUDIT_FILE", audit_path):
                 result = process_evidence(
                     str(self.test_file),
                     "Member3"
