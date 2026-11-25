@@ -5,3 +5,8 @@ venv/
 .env
 .vscode/
 .DS_Store
+# Database
+backend/*.db
+
+# Uploaded evidence
+backend/storage/evidence/
