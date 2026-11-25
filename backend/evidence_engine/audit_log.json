@@ -18,5 +18,25 @@
         "timestamp": "2026-11-25T10:41:27.606121+00:00",
         "previous_hash": "4761a30af196ed9ce66dd79cadf5acaa449f8e364a0062f98172fd445b73af55",
         "record_hash": "3c7ed9308625e6237fc1605542a97404062e1e31f218b3a66655d25d4845f0c1"
+    },
+    {
+        "record_id": "2be54bdf-07fe-48a5-91c7-a98c28f74d36",
+        "evidence_id": "E001",
+        "action": "UPLOAD_AND_PROCESS",
+        "performed_by": "Member3",
+        "details": "Processed sample.txt",
+        "timestamp": "2026-11-25T13:08:06.019072+00:00",
+        "previous_hash": "3c7ed9308625e6237fc1605542a97404062e1e31f218b3a66655d25d4845f0c1",
+        "record_hash": "c2cf28d4349bd0793baef6b9531554da4288d016c19dddebd2015c1a26fbd712"
+    },
+    {
+        "record_id": "5fc23009-b96c-46ec-925a-a90286e4159e",
+        "evidence_id": "E001",
+        "action": "UPLOAD_AND_PROCESS",
+        "performed_by": "Member3",
+        "details": "Processed sample.txt",
+        "timestamp": "2026-11-25T13:14:48.872495+00:00",
+        "previous_hash": "c2cf28d4349bd0793baef6b9531554da4288d016c19dddebd2015c1a26fbd712",
+        "record_hash": "83488a6e7ff35198c6a0ea6bd50578d979b0572025f7b3947ff4a552e756f0c3"
     }
 ]

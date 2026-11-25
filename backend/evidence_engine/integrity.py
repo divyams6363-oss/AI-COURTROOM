@@ -1,6 +1,9 @@
 
 from pathlib import Path
-from hashing import calculate_hash
+try:
+    from .hashing import calculate_hash
+except ImportError:
+    from hashing import calculate_hash
 
 
 def verify_integrity(
