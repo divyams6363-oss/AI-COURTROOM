@@ -4,6 +4,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from database import init_db, get_connection
@@ -16,6 +17,12 @@ app = FastAPI(
     description="AI-powered courtroom analysis system",
     version="1.0.0"
 )
+allow_origins=[
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+],
 
 
 # --------------------------------------------------
