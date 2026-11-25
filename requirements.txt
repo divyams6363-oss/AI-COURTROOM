@@ -1,3 +1,12 @@
+fastapi
+uvicorn[standard]
+python-multipart
 python-dotenv
 pydantic
 pytest
+pypdf
+python-docx
+pandas
+openpyxl
+python-dateutil
+networkx
