@@ -1,0 +1,7 @@
+Transaction ID: TXN-2026-001
+Date: 20 November 2026
+Amount: Rs. 50000
+Account: Company Account
+Description: Transfer to Employee Account
+Status: Completed
+Authorization: No approval record attached.
