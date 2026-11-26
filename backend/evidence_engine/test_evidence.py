@@ -1,3 +1,4 @@
+
 import unittest
 import tempfile
 from pathlib import Path
@@ -148,20 +149,20 @@ class TestEvidenceEngine(unittest.TestCase):
                 "E001"
             )
 
-            self.assertEqual(
-                result["processing_status"],
-                "success"
-            )
+        self.assertEqual(
+            result["processing_status"],
+            "success"
+        )
 
-            self.assertEqual(
-                result["metadata"]["evidence_id"],
-                "E001"
-            )
+        self.assertEqual(
+            result["metadata"]["evidence_id"],
+            "E001"
+        )
 
-            self.assertIn("sha256", result["metadata"])
-            self.assertIn("extracted_text", result)
-            self.assertIn("timeline", result)
-            self.assertIn("graph", result)
+        self.assertIn("sha256", result["metadata"])
+        self.assertIn("extracted_text", result)
+        self.assertIn("timeline", result)
+        self.assertIn("graph", result)
 
 
 if __name__ == "__main__":

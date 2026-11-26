@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 
 // Custom evidence node
-function EvidenceNode({ data }) {
+function EvidenceNode({ data, selected }) {
   const Icon =
     data.type === "image"
       ? Image
@@ -31,7 +31,9 @@ function EvidenceNode({ data }) {
       : FileText;
 
   return (
-    <div className="bg-[#172033] border border-slate-600 rounded-xl p-4 min-w-[175px] shadow-xl">
+    <div className={`bg-[#172033] border rounded-xl p-4 min-w-[175px] shadow-xl ${
+      selected ? "border-blue-400" : "border-slate-600"
+    }`}>
       <Handle type="target" position={Position.Top} />
 
       <div className="flex items-center gap-2 mb-3">
@@ -41,12 +43,12 @@ function EvidenceNode({ data }) {
         </span>
       </div>
 
-      <h3 className="font-semibold text-sm">
-        {data.label}
+      <h3 className="font-semibold text-sm text-white">
+        {data.label || data.filename || "Evidence"}
       </h3>
 
       <p className="text-xs text-slate-400 mt-2">
-        {data.description || ""}
+        {data.description || data.filename || ""}
       </p>
 
       <Handle type="source" position={Position.Bottom} />
@@ -56,6 +58,7 @@ function EvidenceNode({ data }) {
 
 const nodeTypes = {
   evidence: EvidenceNode,
+  evidenceNode: EvidenceNode,
 };
 
 export default function Graph() {
@@ -70,10 +73,12 @@ export default function Graph() {
   useEffect(() => {
     fetch("http://127.0.0.1:8000/cases")
       .then((res) => {
-        if (!res.ok) throw new Error("Failed");
+        if (!res.ok) throw new Error("Failed to load cases");
         return res.json();
       })
-      .then((data) => setCases(data))
+      .then((data) => {
+        setCases(Array.isArray(data) ? data : []);
+      })
       .catch(() => setError("Unable to load cases."));
   }, []);
 
@@ -101,8 +106,8 @@ export default function Graph() {
       const data = await response.json();
       const result = data.graph || data;
 
-      setNodes(result.nodes || []);
-      setEdges(result.edges || []);
+      setNodes(Array.isArray(result.nodes) ? result.nodes : []);
+      setEdges(Array.isArray(result.edges) ? result.edges : []);
     } catch (err) {
       console.error(err);
       setNodes([]);
@@ -215,7 +220,6 @@ export default function Graph() {
           <p className="text-slate-400 text-sm">
             Evidence Nodes
           </p>
-
           <h2 className="text-2xl font-bold mt-2">
             {nodes.length}
           </h2>
@@ -225,7 +229,6 @@ export default function Graph() {
           <p className="text-slate-400 text-sm">
             Relationships
           </p>
-
           <h2 className="text-2xl font-bold mt-2">
             {edges.length}
           </h2>
@@ -235,7 +238,6 @@ export default function Graph() {
           <p className="text-slate-400 text-sm">
             Contradictions
           </p>
-
           <h2 className="text-2xl font-bold mt-2 text-red-400">
             {edges.filter((e) => e.label === "CONTRADICTS").length}
           </h2>
@@ -310,7 +312,6 @@ export default function Graph() {
         <div className="bg-[#111827] border border-slate-700 rounded-xl p-5">
 
           <div className="flex justify-between items-center">
-
             <h2 className="font-bold text-lg">
               Evidence Details
             </h2>
@@ -318,19 +319,20 @@ export default function Graph() {
             <button onClick={() => setSelectedNode(null)}>
               <X />
             </button>
-
           </div>
 
           <h3 className="text-blue-400 font-semibold mt-4">
-            {selectedNode.data.label}
+            {selectedNode.data?.label ||
+              selectedNode.data?.filename ||
+              "Evidence"}
           </h3>
 
           <p className="text-slate-400 mt-2">
-            {selectedNode.data.description}
+            {selectedNode.data?.description || ""}
           </p>
 
           <p className="text-xs text-slate-500 mt-3">
-            Evidence ID: {selectedNode.id}
+            Evidence ID: {selectedNode.data?.evidenceId || selectedNode.id}
           </p>
 
           <div className="flex items-center gap-2 mt-4 text-xs text-orange-400">

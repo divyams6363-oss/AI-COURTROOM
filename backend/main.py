@@ -7,18 +7,11 @@ from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-try:
-    from .database import init_db, get_connection
-    from .evidence_engine.processor import process_evidence
-    from .evidence_engine.timeline import extract_dates
-    from .evidence_engine.graph import build_evidence_graph
-    from .ai_engine import run_courtroom
-except ImportError:
-    from database import init_db, get_connection
-    from evidence_engine.processor import process_evidence
-    from evidence_engine.timeline import extract_dates
-    from evidence_engine.graph import build_evidence_graph
-    from ai_engine import run_courtroom
+from .database import init_db, get_connection
+from .evidence_engine.processor import process_evidence
+from .evidence_engine.timeline import extract_dates
+from .evidence_engine.graph import build_evidence_graph
+from .ai_engine import run_courtroom
 
 
 # --------------------------------------------------
@@ -26,10 +19,11 @@ except ImportError:
 # --------------------------------------------------
 
 app = FastAPI(
-    title="VERITAS AI - AI COURTROOM",
-    description="AI-powered courtroom and evidence intelligence system",
-    version="2.0.0"
+    title="AI-COURTROOM",
+    description="AI-powered courtroom analysis system",
+    version="1.0.0"
 )
+
 
 # --------------------------------------------------
 # CORS
@@ -47,6 +41,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # --------------------------------------------------
 # STORAGE CONFIGURATION
@@ -121,7 +116,7 @@ def log_audit_action(conn, case_id, action, details):
 def get_existing_case(case_id):
     with get_connection() as conn:
         case = conn.execute(
-            "SELECT id FROM cases WHERE id = ?",
+            "SELECT * FROM cases WHERE id = ?",
             (case_id,)
         ).fetchone()
 
@@ -131,7 +126,7 @@ def get_existing_case(case_id):
             detail="Case not found"
         )
 
-    return case
+    return dict(case)
 
 
 def get_evidence_records(case_id):
@@ -160,16 +155,13 @@ def home():
     return {
         "message": "Welcome to VERITAS AI",
         "status": "Backend running successfully",
-        "version": "2.0.0"
+        "version": "2.1.0"
     }
 
 
 @app.get("/health")
 def health():
-    return {
-        "status": "healthy",
-        "database": "connected"
-    }
+    return {"status": "healthy"}
 
 
 @app.get("/api")
@@ -239,19 +231,68 @@ def get_cases():
 
 @app.get("/cases/{case_id}")
 def get_case(case_id: int):
-    with get_connection() as conn:
-        row = conn.execute(
-            "SELECT * FROM cases WHERE id = ?",
-            (case_id,)
-        ).fetchone()
+    return get_existing_case(case_id)
 
-    if row is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Case not found"
+
+# --------------------------------------------------
+# AI COURTROOM - FIVE AI MODULES
+# --------------------------------------------------
+
+@app.post("/cases/{case_id}/courtroom")
+def analyze_courtroom(case_id: int):
+
+    case = get_existing_case(case_id)
+    evidence_records = get_evidence_records(case_id)
+
+    evidence_list = []
+
+    for item in evidence_records:
+        evidence_list.append({
+            "id": item["id"],
+            "evidence_id": item["id"],
+            "filename": item["filename"],
+            "text": item.get("extracted_text") or "",
+            "extracted_text": item.get("extracted_text") or "",
+            "file_type": item["file_type"],
+            "sha256": item["sha256"],
+            "uploaded_at": item["uploaded_at"]
+        })
+
+    try:
+        result = run_courtroom(
+            case,
+            evidence_list
         )
 
-    return dict(row)
+        with get_connection() as conn:
+            log_audit_action(
+                conn,
+                case_id,
+                "COURTROOM_ANALYSIS",
+                "AI Courtroom analysis completed"
+            )
+
+        return {
+            "success": True,
+            "message": "Courtroom analysis completed successfully",
+            **result
+        }
+
+    except Exception as error:
+        print("COURTROOM ERROR:", str(error))
+
+        with get_connection() as conn:
+            log_audit_action(
+                conn,
+                case_id,
+                "COURTROOM_ANALYSIS_FAILED",
+                str(error)
+            )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Courtroom analysis failed"
+        )
 
 
 # --------------------------------------------------
@@ -263,6 +304,7 @@ async def upload_evidence(
     case_id: int,
     file: UploadFile = File(...)
 ):
+
     get_existing_case(case_id)
 
     filename = Path(file.filename or "").name
@@ -292,7 +334,6 @@ async def upload_evidence(
     evidence_id = None
 
     try:
-        # Save uploaded file in chunks
         with saved_path.open("wb") as destination:
             while True:
                 chunk = await file.read(1024 * 1024)
@@ -316,23 +357,14 @@ async def upload_evidence(
                 detail="Empty file"
             )
 
-        # Calculate original SHA-256
         file_hash = calculate_sha256(saved_path)
 
-        # Create evidence record
         with get_connection() as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO evidence
-                (
-                    case_id,
-                    filename,
-                    file_path,
-                    file_type,
-                    file_size,
-                    sha256,
-                    extracted_text
-                )
+                (case_id, filename, file_path, file_type,
+                 file_size, sha256, extracted_text)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
@@ -355,7 +387,6 @@ async def upload_evidence(
                 f"Evidence uploaded: {filename}"
             )
 
-        # Process using Member 3 evidence engine
         processing_result = None
         processing_error = None
         extracted_text = ""
@@ -368,9 +399,10 @@ async def upload_evidence(
             )
 
             if isinstance(processing_result, dict):
-                extracted_text = processing_result.get(
-                    "extracted_text", ""
-                ) or ""
+                extracted_text = (
+                    processing_result.get("extracted_text", "")
+                    or ""
+                )
 
             with get_connection() as conn:
                 conn.execute(
@@ -456,6 +488,7 @@ async def upload_evidence(
 
 @app.get("/cases/{case_id}/evidence")
 def get_case_evidence(case_id: int):
+
     get_existing_case(case_id)
 
     evidence = get_evidence_records(case_id)
@@ -472,6 +505,7 @@ def get_case_evidence(case_id: int):
 
 @app.get("/evidence/{evidence_id}")
 def get_evidence(evidence_id: int):
+
     with get_connection() as conn:
         row = conn.execute(
             """
@@ -643,50 +677,28 @@ def get_audit_logs(case_id: int):
 
 
 # --------------------------------------------------
-# VERITAS AI COURTROOM ANALYSIS
+# VERITAS AI ANALYSIS
 # --------------------------------------------------
 
-@app.post("/cases/{case_id}/analyze")
+@app.post("/cases/{case_id}/analyse")
 def analyze_case(case_id: int):
 
-    with get_connection() as conn:
-        case = conn.execute(
-            "SELECT * FROM cases WHERE id = ?",
-            (case_id,)
-        ).fetchone()
+    case = get_existing_case(case_id)
+    evidence_rows = get_evidence_records(case_id)
 
-        if case is None:
-            raise HTTPException(
-                status_code=404,
-                detail="Case not found"
-            )
-
-        evidence_rows = conn.execute(
-            """
-            SELECT id, filename, extracted_text,
-                   sha256, uploaded_at
-            FROM evidence
-            WHERE case_id = ?
-            ORDER BY id
-            """,
-            (case_id,)
-        ).fetchall()
-
-        case_data = dict(case)
-
-        evidence_list = [
-            {
-                "id": row["id"],
-                "filename": row["filename"],
-                "text": row["extracted_text"] or "",
-                "sha256": row["sha256"],
-                "uploaded_at": row["uploaded_at"]
-            }
-            for row in evidence_rows
-        ]
+    evidence_list = [
+        {
+            "id": row["id"],
+            "filename": row["filename"],
+            "text": row.get("extracted_text") or "",
+            "sha256": row["sha256"],
+            "uploaded_at": row["uploaded_at"]
+        }
+        for row in evidence_rows
+    ]
 
     result = run_courtroom(
-        case_data,
+        case,
         evidence_list
     )
 
@@ -699,3 +711,4 @@ def analyze_case(case_id: int):
         )
 
     return result
+
