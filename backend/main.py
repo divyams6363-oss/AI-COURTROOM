@@ -12,11 +12,14 @@ try:
     from .evidence_engine.processor import process_evidence
     from .evidence_engine.timeline import extract_dates
     from .evidence_engine.graph import build_evidence_graph
+    from .ai_engine.orchestrator import run_courtroom
+
 except ImportError:
     from database import init_db, get_connection
     from evidence_engine.processor import process_evidence
     from evidence_engine.timeline import extract_dates
     from evidence_engine.graph import build_evidence_graph
+    from ai_engine.orchestrator import run_courtroom
 
 
 # --------------------------------------------------
@@ -26,12 +29,12 @@ except ImportError:
 app = FastAPI(
     title="VERITAS AI - AI COURTROOM",
     description="AI-powered courtroom and evidence intelligence system",
-    version="2.0.0"
+    version="2.1.0"
 )
 
 
 # --------------------------------------------------
-# CORS - FRONTEND CONNECTION
+# CORS
 # --------------------------------------------------
 
 app.add_middleware(
@@ -58,14 +61,8 @@ STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 MAX_FILE_SIZE = 25 * 1024 * 1024
 
 ALLOWED_EXTENSIONS = {
-    ".pdf",
-    ".docx",
-    ".txt",
-    ".csv",
-    ".xlsx",
-    ".png",
-    ".jpg",
-    ".jpeg"
+    ".pdf", ".docx", ".txt", ".csv",
+    ".xlsx", ".png", ".jpg", ".jpeg"
 }
 
 
@@ -119,7 +116,7 @@ def log_audit_action(conn, case_id, action, details):
 def get_existing_case(case_id):
     with get_connection() as conn:
         case = conn.execute(
-            "SELECT id FROM cases WHERE id = ?",
+            "SELECT * FROM cases WHERE id = ?",
             (case_id,)
         ).fetchone()
 
@@ -129,7 +126,7 @@ def get_existing_case(case_id):
             detail="Case not found"
         )
 
-    return case
+    return dict(case)
 
 
 def get_evidence_records(case_id):
@@ -158,7 +155,7 @@ def home():
     return {
         "message": "Welcome to VERITAS AI",
         "status": "Backend running successfully",
-        "version": "2.0.0"
+        "version": "2.1.0"
     }
 
 
@@ -227,20 +224,74 @@ def get_cases():
 
 @app.get("/cases/{case_id}")
 def get_case(case_id: int):
+    return get_existing_case(case_id)
 
-    with get_connection() as conn:
-        row = conn.execute(
-            "SELECT * FROM cases WHERE id = ?",
-            (case_id,)
-        ).fetchone()
 
-    if row is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Case not found"
+# --------------------------------------------------
+# AI COURTROOM - FIVE AI MODULES
+# --------------------------------------------------
+
+@app.post("/cases/{case_id}/courtroom")
+def analyze_courtroom(case_id: int):
+
+    # 1. Get case details
+    case = get_existing_case(case_id)
+
+    # 2. Get all evidence
+    evidence_records = get_evidence_records(case_id)
+
+    # 3. Convert database evidence into AI engine format
+    evidence_list = []
+
+    for item in evidence_records:
+        evidence_list.append({
+            "id": item["id"],
+            "evidence_id": item["id"],
+            "filename": item["filename"],
+            "text": item.get("extracted_text") or "",
+            "extracted_text": item.get("extracted_text") or "",
+            "file_type": item["file_type"],
+            "sha256": item["sha256"],
+            "uploaded_at": item["uploaded_at"]
+        })
+
+    # 4. Run all five AI modules
+    try:
+        result = run_courtroom(
+            case,
+            evidence_list
         )
 
-    return dict(row)
+        # 5. Save audit log
+        with get_connection() as conn:
+            log_audit_action(
+                conn,
+                case_id,
+                "COURTROOM_ANALYSIS",
+                "AI Courtroom analysis completed"
+            )
+
+        return {
+            "success": True,
+            "message": "Courtroom analysis completed successfully",
+            **result
+        }
+
+    except Exception as error:
+        print("COURTROOM ERROR:", str(error))
+
+        with get_connection() as conn:
+            log_audit_action(
+                conn,
+                case_id,
+                "COURTROOM_ANALYSIS_FAILED",
+                str(error)
+            )
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Courtroom analysis failed: {str(error)}"
+        )
 
 
 # --------------------------------------------------
@@ -275,16 +326,13 @@ async def upload_evidence(
     case_folder.mkdir(parents=True, exist_ok=True)
 
     saved_path = (
-        case_folder /
-        f"{uuid.uuid4().hex}{extension}"
+        case_folder / f"{uuid.uuid4().hex}{extension}"
     )
 
     size = 0
     evidence_id = None
 
     try:
-
-        # Save file safely in chunks
         with saved_path.open("wb") as destination:
 
             while True:
@@ -309,22 +357,15 @@ async def upload_evidence(
                 detail="Empty file"
             )
 
-        # Calculate original SHA-256
         file_hash = calculate_sha256(saved_path)
 
-        # Save evidence record
         with get_connection() as conn:
-
             cursor = conn.execute(
                 """
                 INSERT INTO evidence
                 (
-                    case_id,
-                    filename,
-                    file_path,
-                    file_type,
-                    file_size,
-                    sha256,
+                    case_id, filename, file_path,
+                    file_type, file_size, sha256,
                     extracted_text
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -349,7 +390,6 @@ async def upload_evidence(
                 f"Evidence uploaded: {filename}"
             )
 
-        # Process evidence using Member 3 engine
         processing_result = None
         processing_error = None
 
@@ -360,12 +400,13 @@ async def upload_evidence(
                 evidence_id=evidence_id
             )
 
-            extracted_text = processing_result.get(
-                "extracted_text", ""
+            extracted_text = (
+                processing_result.get("extracted_text", "")
+                if isinstance(processing_result, dict)
+                else ""
             )
 
             with get_connection() as conn:
-
                 conn.execute(
                     """
                     UPDATE evidence
@@ -402,8 +443,7 @@ async def upload_evidence(
             "file_size": size,
             "sha256": file_hash,
             "processing_status": (
-                "success"
-                if processing_result is not None
+                "success" if processing_result is not None
                 else "failed"
             ),
             "processing_result": processing_result,
@@ -439,7 +479,6 @@ def get_case_evidence(case_id: int):
 
     evidence = get_evidence_records(case_id)
 
-    # Do not expose internal storage paths
     for item in evidence:
         item.pop("file_path", None)
 
@@ -507,10 +546,7 @@ def verify_evidence_integrity(evidence_id: int):
     else:
         actual_hash = calculate_sha256(file_path)
         verified = actual_hash == evidence["sha256"]
-
-        status = (
-            "UNCHANGED" if verified else "MODIFIED"
-        )
+        status = "UNCHANGED" if verified else "MODIFIED"
 
     with get_connection() as conn:
         log_audit_action(
@@ -541,7 +577,6 @@ def get_case_timeline(case_id: int):
     get_existing_case(case_id)
 
     evidence_records = get_evidence_records(case_id)
-
     timeline = []
 
     for evidence in evidence_records:
@@ -550,16 +585,16 @@ def get_case_timeline(case_id: int):
             evidence.get("extracted_text") or ""
         )
 
-        for event in events:
-         timeline.append({
-    "id": f"{evidence['id']}-{event.get('date')}",
-    "evidence_id": evidence["id"],
-    "filename": evidence["filename"],
-    "date": event.get("date"),
-    "original_date": event.get("original_date"),
-    "description": event.get("description"),
-    "human_verified": False
-})
+        for index, event in enumerate(events):
+            timeline.append({
+                "id": f"{evidence['id']}-{index}",
+                "evidence_id": evidence["id"],
+                "filename": evidence["filename"],
+                "date": event.get("date"),
+                "original_date": event.get("original_date"),
+                "description": event.get("description"),
+                "human_verified": False
+            })
 
     timeline.sort(
         key=lambda item: item.get("date") or ""
@@ -633,8 +668,9 @@ def api_information():
 
     return {
         "application": "VERITAS AI",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "documentation": "/docs",
         "health": "/health",
-        "frontend_origin": "http://localhost:5173"
+        "frontend_origin": "http://localhost:5173",
+        "courtroom_endpoint": "POST /cases/{case_id}/courtroom"
     }
