@@ -1,4 +1,3 @@
-
 from pathlib import Path
 from .hashing import calculate_hash
 
