@@ -1,5 +1,5 @@
 
-import { useState, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   ReactFlow,
@@ -7,166 +7,322 @@ import {
   Controls,
   MiniMap,
   Handle,
-  Position,
-  MarkerType,
+  Position
 } from "@xyflow/react";
 
 import "@xyflow/react/dist/style.css";
+import api from "../services/api";
 
-import {
-  FileText,
-  Image,
-  CreditCard,
-  X,
-  ShieldCheck
-} from "lucide-react";
+// Safely convert backend responses into arrays.
+const getArray = (data, key) => {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.[key])) return data[key];
+  if (Array.isArray(data?.data)) return data.data;
+  if (Array.isArray(data?.items)) return data.items;
+  return [];
+};
 
-// Custom evidence node
-
-function EvidenceNode({ data }) {
-  const Icon = data.type === "image"
-    ? Image
-    : data.type === "transaction"
-    ? CreditCard
-    : FileText;
-
+// Custom evidence node.
+function EvidenceNode({ data, selected }) {
   return (
-    <div className="bg-[#172033] border border-slate-600
-      rounded-xl p-4 min-w-[175px] shadow-xl">
-
+    <div
+      className={`min-w-[210px] rounded-xl border p-4 shadow-lg ${
+        selected
+          ? "border-blue-400 bg-slate-800"
+          : "border-slate-600 bg-slate-900"
+      }`}
+    >
       <Handle type="target" position={Position.Top} />
 
-      <div className="flex items-center gap-2 mb-3">
-        <Icon size={20} className="text-blue-400" />
-        <span className="text-xs text-slate-400">
-          {data.type.toUpperCase()}
+      <div className="flex items-center gap-2">
+        <div className="rounded-lg bg-blue-500/20 p-2 text-blue-400">
+          📄
+        </div>
+
+        <div className="min-w-0">
+          <p className="max-w-[155px] truncate text-sm font-semibold text-white">
+            {data.filename}
+          </p>
+
+          <p className="text-xs text-slate-400">
+            Evidence #{data.evidenceId}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <span className="rounded-md bg-slate-700 px-2 py-1 text-xs text-slate-300">
+          {data.fileType || "File"}
+        </span>
+
+        <span className="rounded-md bg-blue-500/10 px-2 py-1 text-xs text-blue-300">
+          Evidence
         </span>
       </div>
 
-      <h3 className="font-semibold text-sm">
-        {data.label}
-      </h3>
-
-      <p className="text-xs text-slate-400 mt-2">
-        {data.description}
-      </p>
-
       <Handle type="source" position={Position.Bottom} />
-
     </div>
   );
 }
 
 const nodeTypes = {
-  evidence: EvidenceNode
+  evidenceNode: EvidenceNode
 };
 
-// Sample evidence
-
-const initialNodes = [
-  {
-    id: "1",
-    type: "evidence",
-    position: { x: 100, y: 50 },
-    data: {
-      label: "Bank Statement",
-      type: "document",
-      description: "Transaction record"
-    }
-  },
-  {
-    id: "2",
-    type: "evidence",
-    position: { x: 450, y: 50 },
-    data: {
-      label: "Payment Screenshot",
-      type: "image",
-      description: "Payment confirmation image"
-    }
-  },
-  {
-    id: "3",
-    type: "evidence",
-    position: { x: 270, y: 260 },
-    data: {
-      label: "Transaction Record",
-      type: "transaction",
-      description: "Recorded transfer details"
-    }
-  },
-  {
-    id: "4",
-    type: "evidence",
-    position: { x: 650, y: 280 },
-    data: {
-      label: "Email Document",
-      type: "document",
-      description: "Communication evidence"
-    }
-  }
-];
-
-const initialEdges = [
-  {
-    id: "e1-3",
-    source: "1",
-    target: "3",
-    label: "SUPPORTS",
-    animated: true,
-    style: { stroke: "#22c55e", strokeWidth: 2 },
-    labelStyle: { fill: "#22c55e", fontWeight: 600 },
-    markerEnd: { type: MarkerType.ArrowClosed }
-  },
-  {
-    id: "e2-3",
-    source: "2",
-    target: "3",
-    label: "CONTRADICTS",
-    style: { stroke: "#ef4444", strokeWidth: 2 },
-    labelStyle: { fill: "#ef4444", fontWeight: 600 },
-    markerEnd: { type: MarkerType.ArrowClosed }
-  },
-  {
-    id: "e3-4",
-    source: "3",
-    target: "4",
-    label: "RELATED",
-    style: { stroke: "#60a5fa", strokeWidth: 2 },
-    labelStyle: { fill: "#60a5fa", fontWeight: 600 },
-    markerEnd: { type: MarkerType.ArrowClosed }
-  }
-];
-
 export default function Graph() {
+  const [cases, setCases] = useState([]);
+  const [selectedCaseId, setSelectedCaseId] = useState("");
 
-  const [nodes, setNodes] = useState(initialNodes);
-  const [edges, setEdges] = useState(initialEdges);
-  const [selectedNode, setSelectedNode] = useState(null);
+  const [nodes, setNodes] = useState([]);
+  const [edges, setEdges] = useState([]);
 
+  const [selectedEvidence, setSelectedEvidence] = useState(null);
 
+  const [loadingCases, setLoadingCases] = useState(true);
+  const [loadingEvidence, setLoadingEvidence] = useState(false);
+
+  const [error, setError] = useState("");
+  const [evidenceError, setEvidenceError] = useState("");
+
+  const requestNumber = useRef(0);
+
+  // Load cases from backend.
+  useEffect(() => {
+    let active = true;
+
+    const loadCases = async () => {
+      setLoadingCases(true);
+      setError("");
+
+      try {
+        const response = await api.get("/cases");
+        const caseList = getArray(response.data, "cases");
+
+        const validCases = caseList.filter(
+          (item) =>
+            item &&
+            (item.id !== undefined || item.case_id !== undefined)
+        );
+
+        if (!active) return;
+
+        setCases(validCases);
+
+        setSelectedCaseId((currentId) => {
+          const exists = validCases.some(
+            (item) =>
+              String(item.id ?? item.case_id) === currentId
+          );
+
+          if (exists) return currentId;
+
+          return validCases.length
+            ? String(validCases[0].id ?? validCases[0].case_id)
+            : "";
+        });
+      } catch (err) {
+        console.error("Cases loading error:", err);
+
+        if (!active) return;
+
+        setError(
+          "Unable to load cases. Please check the backend connection."
+        );
+
+        setCases([]);
+        setSelectedCaseId("");
+      } finally {
+        if (active) setLoadingCases(false);
+      }
+    };
+
+    loadCases();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Load evidence for the selected case.
+  useEffect(() => {
+    const currentRequest = ++requestNumber.current;
+
+    const loadEvidence = async () => {
+      setNodes([]);
+      setEdges([]);
+      setSelectedEvidence(null);
+      setEvidenceError("");
+
+      if (!selectedCaseId) {
+        setLoadingEvidence(false);
+        return;
+      }
+
+      setLoadingEvidence(true);
+
+      try {
+        const response = await api.get(
+          `/cases/${encodeURIComponent(selectedCaseId)}/evidence`
+        );
+
+        if (currentRequest !== requestNumber.current) return;
+
+        const evidenceList = getArray(response.data, "evidence");
+
+        const selectedCase = cases.find(
+          (item) =>
+            String(item.id ?? item.case_id) === selectedCaseId
+        );
+
+        const caseTitle = selectedCase?.title || "Investigation Case";
+
+        const caseNode = {
+          id: "case-root",
+          type: "default",
+          position: { x: 280, y: 30 },
+          data: {
+            label: (
+              <div className="px-3 py-2 text-center">
+                <div className="text-xs text-blue-300">
+                  INVESTIGATION CASE
+                </div>
+
+                <div className="mt-1 max-w-[220px] truncate font-semibold text-white">
+                  {caseTitle}
+                </div>
+
+                <div className="mt-1 text-xs text-slate-400">
+                  Case ID: {selectedCaseId}
+                </div>
+              </div>
+            )
+          },
+          style: {
+            background: "#172554",
+            border: "1px solid #3b82f6",
+            borderRadius: "12px",
+            color: "white",
+            padding: "8px",
+            width: "260px"
+          },
+          sourcePosition: Position.Bottom
+        };
+
+        const evidenceNodes = evidenceList.map((item, index) => {
+          const evidenceId = item.id ?? item.evidence_id ?? index;
+
+          return {
+            id: `evidence-${evidenceId}`,
+            type: "evidenceNode",
+            position: {
+              x: 40 + (index % 3) * 290,
+              y: 210 + Math.floor(index / 3) * 190
+            },
+            data: {
+              evidenceId,
+              filename: item.filename || `Evidence ${index + 1}`,
+              fileType: item.file_type || "Unknown",
+              fileSize: item.file_size,
+              sha256: item.sha256,
+              uploadedAt: item.uploaded_at,
+              caseId: selectedCaseId
+            }
+          };
+        });
+
+        const evidenceEdges = evidenceNodes.map((node) => ({
+          id: `contains-${node.id}`,
+          source: "case-root",
+          target: node.id,
+          label: "CONTAINS",
+          type: "smoothstep",
+          style: { stroke: "#64748b" },
+          labelStyle: { fill: "#94a3b8", fontSize: 11 }
+        }));
+
+        setNodes([caseNode, ...evidenceNodes]);
+        setEdges(evidenceEdges);
+      } catch (err) {
+        if (currentRequest !== requestNumber.current) return;
+
+        console.error("Evidence loading error:", err);
+
+        setEvidenceError(
+          "Unable to load evidence for this case. Check the backend evidence endpoint."
+        );
+      } finally {
+        if (currentRequest === requestNumber.current) {
+          setLoadingEvidence(false);
+        }
+      }
+    };
+
+    loadEvidence();
+
+    return () => {
+      if (requestNumber.current === currentRequest) {
+        requestNumber.current++;
+      }
+    };
+  }, [selectedCaseId, cases]);
+
+  // Handle node changes without applyNodeChanges.
   
 const onNodesChange = useCallback((changes) => {
   if (!Array.isArray(changes)) return;
 
-  setNodes((previousNodes) => {
-    let updatedNodes = [...previousNodes];
+  setNodes((currentNodes) => {
+    let updatedNodes = [...currentNodes];
 
     changes.forEach((change) => {
+      if (change.type === "remove") {
+        updatedNodes = updatedNodes.filter(
+          (node) => node.id !== change.id
+        );
+      }
+
+      if (change.type === "select") {
+        updatedNodes = updatedNodes.map((node) =>
+          node.id === change.id
+            ? { ...node, selected: change.selected }
+            : node
+        );
+      }
+
       if (change.type === "position") {
         updatedNodes = updatedNodes.map((node) =>
           node.id === change.id
             ? {
                 ...node,
-                position: change.position ?? node.position,
+                position: change.position || node.position,
                 dragging: change.dragging
               }
             : node
         );
       }
 
-      if (change.type === "remove") {
-        updatedNodes = updatedNodes.filter(
-          (node) => node.id !== change.id
+      if (change.type === "dimensions") {
+        updatedNodes = updatedNodes.map((node) =>
+          node.id === change.id
+            ? {
+                ...node,
+                measured: change.dimensions || node.measured
+              }
+            : node
+        );
+      }
+
+      if (change.type === "replace") {
+        updatedNodes = updatedNodes.map((node) =>
+          node.id === change.id ? change.item : node
+        );
+      }
+
+      if (change.type === "add") {
+        updatedNodes.splice(
+          change.index ?? updatedNodes.length,
+          0,
+          change.item
         );
       }
     });
@@ -178,166 +334,336 @@ const onNodesChange = useCallback((changes) => {
 const onEdgesChange = useCallback((changes) => {
   if (!Array.isArray(changes)) return;
 
-  setEdges((previousEdges) =>
-    previousEdges.filter(
-      (edge) =>
-        !changes.some(
-          (change) =>
-            change.type === "remove" &&
-            change.id === edge.id
-        )
-    )
-  );
+  setEdges((currentEdges) => {
+    let updatedEdges = [...currentEdges];
+
+    changes.forEach((change) => {
+      if (change.type === "remove") {
+        updatedEdges = updatedEdges.filter(
+          (edge) => edge.id !== change.id
+        );
+      }
+
+      if (change.type === "select") {
+        updatedEdges = updatedEdges.map((edge) =>
+          edge.id === change.id
+            ? { ...edge, selected: change.selected }
+            : edge
+        );
+      }
+
+      if (change.type === "replace") {
+        updatedEdges = updatedEdges.map((edge) =>
+          edge.id === change.id ? change.item : edge
+        );
+      }
+
+      if (change.type === "add") {
+        updatedEdges.splice(
+          change.index ?? updatedEdges.length,
+          0,
+          change.item
+        );
+      }
+    });
+
+    return updatedEdges;
+  });
 }, []);
 
-
+  // Create temporary manual relationships.
   const onConnect = useCallback((connection) => {
-    const newEdge = {
-      ...connection,
-      id: `edge-${Date.now()}`,
-      label: "RELATED",
-      markerEnd: { type: MarkerType.ArrowClosed },
-      style: { stroke: "#60a5fa", strokeWidth: 2 }
-    };
-
-    setEdges(previous => [...previous, newEdge]);
+    setEdges((currentEdges) => [
+      ...currentEdges,
+      {
+        ...connection,
+        id: `manual-${Date.now()}-${currentEdges.length}`,
+        type: "smoothstep",
+        label: "MANUAL RELATION",
+        style: {
+          stroke: "#a78bfa",
+          strokeWidth: 2
+        },
+        labelStyle: {
+          fill: "#c4b5fd",
+          fontSize: 10
+        }
+      }
+    ]);
   }, []);
 
-  return (
-    <div className="space-y-6">
+  const handleNodeClick = useCallback((event, node) => {
+    if (node.type === "evidenceNode") {
+      setSelectedEvidence(node.data);
+    } else {
+      setSelectedEvidence(null);
+    }
+  }, []);
 
+  const evidenceCount = nodes.filter(
+    (node) => node.type === "evidenceNode"
+  ).length;
+
+  const relationshipCount = edges.filter(
+    (edge) => edge.label !== "CONTAINS"
+  ).length;
+
+  const selectedCase = cases.find(
+    (item) =>
+      String(item.id ?? item.case_id) === selectedCaseId
+  );
+
+  return (
+    <div className="space-y-6 text-white">
+
+      {/* Heading */}
       <div>
-        <h1 className="text-3xl font-bold">
+        <h1 className="text-2xl font-bold">
           Evidence Graph
         </h1>
 
-        <p className="text-slate-400 mt-2">
-          Visualize relationships between investigation evidence.
+        <p className="mt-1 text-sm text-slate-400">
+          Explore evidence files connected to an investigation case.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* Case selector */}
+      <div className="rounded-xl border border-slate-700 bg-slate-900 p-5">
+        <label
+          htmlFor="graph-case-select"
+          className="mb-2 block text-sm font-medium text-slate-300"
+        >
+          Select Investigating Case
+        </label>
 
-        <div className="bg-[#111827] border border-slate-800
-          rounded-xl p-4">
-          <p className="text-slate-400 text-sm">Evidence Nodes</p>
-          <h2 className="text-2xl font-bold mt-2">
-            {nodes.length}
-          </h2>
-        </div>
+        <select
+          id="graph-case-select"
+          value={selectedCaseId}
+          onChange={(event) => {
+            setSelectedCaseId(event.target.value);
+          }}
+          disabled={loadingCases || cases.length === 0}
+          className="w-full rounded-lg border border-slate-600 bg-slate-800 px-4 py-3 text-sm text-white outline-none focus:border-blue-500 disabled:opacity-60"
+        >
+          <option value="">
+            {loadingCases
+              ? "Loading cases..."
+              : cases.length === 0
+                ? "No cases available"
+                : "Select a case"}
+          </option>
 
-        <div className="bg-[#111827] border border-slate-800
-          rounded-xl p-4">
-          <p className="text-slate-400 text-sm">Relationships</p>
-          <h2 className="text-2xl font-bold mt-2">
-            {edges.length}
-          </h2>
-        </div>
+          {cases.map((item) => {
+            const id = String(item.id ?? item.case_id);
 
-        <div className="bg-[#111827] border border-slate-800
-          rounded-xl p-4">
-          <p className="text-slate-400 text-sm">
-            Contradictions
+            return (
+              <option key={id} value={id}>
+                {item.title || `Case ${id}`} — ID: {id}
+              </option>
+            );
+          })}
+        </select>
+
+        {selectedCase && (
+          <p className="mt-2 text-xs text-slate-400">
+            Selected: {selectedCase.title} (ID: {selectedCaseId})
           </p>
-          <h2 className="text-2xl font-bold mt-2 text-red-400">
-            {edges.filter(e => e.label === "CONTRADICTS").length}
-          </h2>
-        </div>
+        )}
 
-      </div>
-
-      <div className="bg-[#111827] border border-slate-800
-        rounded-xl overflow-hidden">
-
-        <div className="p-4 border-b border-slate-800">
-          <h2 className="font-semibold">
-            Investigation Relationship Map
-          </h2>
-
-          <p className="text-xs text-slate-400 mt-1">
-            Drag nodes, connect evidence and select nodes for details.
+        {error && (
+          <p className="mt-3 text-sm text-red-400">
+            {error}
           </p>
+        )}
+      </div>
+
+      {/* Statistics */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+
+        <div className="rounded-xl border border-slate-700 bg-slate-900 p-5">
+          <p className="text-sm text-slate-400">Available Cases</p>
+          <p className="mt-2 text-2xl font-bold">{cases.length}</p>
         </div>
 
-        <div className="h-[550px]">
+        <div className="rounded-xl border border-slate-700 bg-slate-900 p-5">
+          <p className="text-sm text-slate-400">Evidence Files</p>
+          <p className="mt-2 text-2xl font-bold">{evidenceCount}</p>
+        </div>
 
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            nodeTypes={nodeTypes}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onNodeClick={(_, node) => setSelectedNode(node)}
-            fitView
-            nodesConnectable={true}
-          >
-
-            <Background color="#334155" gap={20} />
-            <Controls />
-            <MiniMap />
-
-          </ReactFlow>
-
+        <div className="rounded-xl border border-slate-700 bg-slate-900 p-5">
+          <p className="text-sm text-slate-400">Manual Relationships</p>
+          <p className="mt-2 text-2xl font-bold">{relationshipCount}</p>
         </div>
 
       </div>
 
-      <div className="flex flex-wrap gap-5 text-sm text-slate-400">
+      {/* Graph area */}
+      <div className="overflow-hidden rounded-xl border border-slate-700 bg-slate-900">
 
-        <span className="flex items-center gap-2">
-          <span className="w-3 h-3 rounded-full bg-green-500" />
-          Supports
-        </span>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-700 p-4">
+          <div>
+            <h2 className="font-semibold">
+              Case Evidence Network
+            </h2>
 
-        <span className="flex items-center gap-2">
-          <span className="w-3 h-3 rounded-full bg-red-500" />
-          Contradicts
-        </span>
+            <p className="mt-1 text-xs text-slate-400">
+              Select a case to display its evidence.
+            </p>
+          </div>
 
-        <span className="flex items-center gap-2">
-          <span className="w-3 h-3 rounded-full bg-blue-500" />
-          Related
-        </span>
+          {loadingEvidence && (
+            <span className="text-sm text-blue-400">
+              Loading evidence...
+            </span>
+          )}
+        </div>
+
+        {evidenceError && (
+          <div className="p-4 text-sm text-red-400">
+            {evidenceError}
+          </div>
+        )}
+
+        {!loadingCases && cases.length === 0 && !error && (
+          <div className="flex min-h-[350px] items-center justify-center p-6 text-center text-slate-400">
+            No cases found. Create a case first.
+          </div>
+        )}
+
+        {selectedCaseId && (
+          <div className="h-[600px] w-full">
+
+            {loadingEvidence ? (
+              <div className="flex h-full items-center justify-center text-slate-400">
+                Loading case evidence...
+              </div>
+            ) : (
+              <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                nodeTypes={nodeTypes}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                onConnect={onConnect}
+                onNodeClick={handleNodeClick}
+                fitView
+                fitViewOptions={{ padding: 0.25 }}
+                minZoom={0.2}
+                maxZoom={1.5}
+                defaultEdgeOptions={{ type: "smoothstep" }}
+              >
+                <Background color="#334155" gap={20} />
+
+                <Controls />
+
+                <MiniMap
+                  nodeColor={(node) =>
+                    node.type === "evidenceNode"
+                      ? "#2563eb"
+                      : "#1d4ed8"
+                  }
+                  maskColor="rgba(15, 23, 42, 0.7)"
+                />
+              </ReactFlow>
+            )}
+
+          </div>
+        )}
+
+        {!loadingCases && cases.length > 0 && !selectedCaseId && (
+          <div className="flex min-h-[350px] items-center justify-center text-slate-400">
+            Select an investigation case to view its evidence graph.
+          </div>
+        )}
 
       </div>
 
-      {selectedNode && (
-        <div className="bg-[#111827] border border-slate-700
-          rounded-xl p-5">
+      {/* Evidence details */}
+      {selectedEvidence && (
+        <div className="rounded-xl border border-blue-500/30 bg-slate-900 p-5">
 
-          <div className="flex justify-between items-center">
-
-            <h2 className="font-bold text-lg">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="font-semibold">
               Evidence Details
             </h2>
 
-            <button onClick={() => setSelectedNode(null)}>
-              <X />
+            <button
+              onClick={() => setSelectedEvidence(null)}
+              className="text-sm text-slate-400 hover:text-white"
+            >
+              Close
             </button>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+
+            <div>
+              <p className="text-xs text-slate-400">Filename</p>
+              <p className="mt-1 break-all text-sm">
+                {selectedEvidence.filename}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs text-slate-400">Evidence ID</p>
+              <p className="mt-1 text-sm">
+                {selectedEvidence.evidenceId}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs text-slate-400">File Type</p>
+              <p className="mt-1 text-sm">
+                {selectedEvidence.fileType}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs text-slate-400">File Size</p>
+              <p className="mt-1 text-sm">
+                {selectedEvidence.fileSize != null
+                  ? `${(Number(selectedEvidence.fileSize) / 1024).toFixed(2)} KB`
+                  : "Not available"}
+              </p>
+            </div>
+
+            <div className="sm:col-span-2">
+              <p className="text-xs text-slate-400">SHA-256</p>
+              <p className="mt-1 break-all font-mono text-xs text-blue-300">
+                {selectedEvidence.sha256 || "Not available"}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs text-slate-400">Uploaded At</p>
+              <p className="mt-1 text-sm">
+                {selectedEvidence.uploadedAt
+                  ? new Date(selectedEvidence.uploadedAt).toLocaleString()
+                  : "Not available"}
+              </p>
+            </div>
 
           </div>
 
-          <h3 className="text-blue-400 font-semibold mt-4">
-            {selectedNode.data.label}
-          </h3>
-
-          <p className="text-slate-400 mt-2">
-            {selectedNode.data.description}
+          <p className="mt-4 text-xs text-amber-400">
+            Manual graph connections are temporary and are not saved to the backend.
           </p>
-
-          <p className="text-xs text-slate-500 mt-3">
-            Evidence ID: {selectedNode.id}
-          </p>
-
-          <div className="flex items-center gap-2 mt-4
-            text-xs text-orange-400">
-            <ShieldCheck size={16} />
-            Sample relationship data — not backend verified
-          </div>
-
         </div>
       )}
+
+      {/* Information */}
+      <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
+        <p className="text-sm font-medium text-amber-300">
+          Graph Information
+        </p>
+
+        <p className="mt-1 text-xs leading-5 text-slate-400">
+          Case-to-evidence connections show which files belong to the
+          selected case. They do not establish whether evidence supports
+          or contradicts an allegation. Manually created connections
+          are temporary and are not stored by the backend.
+        </p>
+      </div>
 
     </div>
   );
