@@ -1,5 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import ReactFlow, {
+  addEdge,
+  applyEdgeChanges,
+  applyNodeChanges,
   Background,
   Controls,
   MiniMap,
@@ -73,48 +76,95 @@ export default function Graph() {
     nodes: [],
     edges: []
   });
+  const [selectedEvidence, setSelectedEvidence] = useState(null);
+  const [loadingCases, setLoadingCases] = useState(true);
+  const [loadingEvidence, setLoadingEvidence] = useState(false);
+  const [error, setError] = useState("");
+  const [evidenceError, setEvidenceError] = useState("");
 
   useEffect(() => {
     api.get("/cases")
-      .then(res => setCases(res.data))
-      .catch(console.error);
+      .then(res => setCases(getArray(res.data, "cases")))
+      .catch(err => {
+        console.error(err);
+        setError("Unable to load cases.");
+      })
+      .finally(() => setLoadingCases(false));
   }, []);
 
   async function loadGraph(id) {
     setCaseId(id);
+    setSelectedEvidence(null);
+    setError("");
+    setEvidenceError("");
 
+    if (!id) {
+      setGraph({ nodes: [], edges: [] });
+      return;
+    }
+
+    setLoadingEvidence(true);
     try {
       const response = await api.get(`/cases/${id}/graph`);
-
+      const data = response.data || {};
       setGraph({
-        nodes: response.data.nodes || [],
-        edges: response.data.edges || []
+        nodes: getArray(data.nodes, "nodes"),
+        edges: getArray(data.edges, "edges")
       });
     } catch (error) {
       console.error(error);
+      setGraph({ nodes: [], edges: [] });
+      setEvidenceError("Unable to load the evidence graph.");
+    } finally {
+      setLoadingEvidence(false);
     }
   }
+
+  const onNodesChange = useCallback(changes => {
+    setGraph(current => ({
+      ...current,
+      nodes: applyNodeChanges(changes, current.nodes)
+    }));
+  }, []);
+
+  const onEdgesChange = useCallback(changes => {
+    setGraph(current => ({
+      ...current,
+      edges: applyEdgeChanges(changes, current.edges)
+    }));
+  }, []);
+
+  const onConnect = useCallback(connection => {
+    setGraph(current => ({
+      ...current,
+      edges: addEdge(connection, current.edges)
+    }));
+  }, []);
+
+  const selectedCase = cases.find(item => String(item.id) === String(caseId));
+  const evidenceCount = graph.nodes.length;
+  const relationshipCount = graph.edges.length;
 
   return (
     <div className="space-y-6 text-white">
 
       <h1 className="text-3xl font-bold">Evidence Graph</h1>
 
-      <select
-        value={caseId}
-        onChange={e => loadGraph(e.target.value)}
-        className="bg-slate-900 border border-slate-700
-        p-3 rounded-lg w-full"
-      >
-        <option value="">Select a case</option>
-        {cases.map(c => (
-          <option key={c.id} value={c.id}>{c.title}</option>
-        ))}
-      </select>
+      <div>
+        <select
+          value={caseId}
+          onChange={e => loadGraph(e.target.value)}
+          className="w-full rounded-lg border border-slate-700 bg-slate-900 p-3"
+        >
+          <option value="">Select a case</option>
+          {cases.map(c => (
+            <option key={c.id} value={c.id}>{c.title}</option>
+          ))}
+        </select>
 
         {selectedCase && (
           <p className="mt-2 text-xs text-slate-400">
-            Selected: {selectedCase.title} (ID: {selectedCaseId})
+            Selected: {selectedCase.title} (ID: {caseId})
           </p>
         )}
 
@@ -178,7 +228,7 @@ export default function Graph() {
           </div>
         )}
 
-        {selectedCaseId && (
+        {caseId && (
           <div className="h-[600px] w-full">
 
             {loadingEvidence ? (
@@ -187,13 +237,16 @@ export default function Graph() {
               </div>
             ) : (
               <ReactFlow
-                nodes={nodes}
-                edges={edges}
+                nodes={graph.nodes}
+                edges={graph.edges}
                 nodeTypes={nodeTypes}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
-                onNodeClick={handleNodeClick}
+                onNodeClick={(_, node) => setSelectedEvidence({
+                  evidenceId: node.data?.evidenceId ?? node.id,
+                  ...node.data
+                })}
                 fitView
                 fitViewOptions={{ padding: 0.25 }}
                 minZoom={0.2}
@@ -218,7 +271,7 @@ export default function Graph() {
           </div>
         )}
 
-        {!loadingCases && cases.length > 0 && !selectedCaseId && (
+        {!loadingCases && cases.length > 0 && !caseId && (
           <div className="flex min-h-[350px] items-center justify-center text-slate-400">
             Select an investigation case to view its evidence graph.
           </div>
@@ -312,7 +365,6 @@ export default function Graph() {
           are temporary and are not stored by the backend.
         </p>
       </div>
-
     </div>
   );
 }
