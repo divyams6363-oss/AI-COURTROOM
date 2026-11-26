@@ -70,9 +70,6 @@ export default function Timeline() {
 
       </div>
 
-        </div>
-      )}
-
       {/* Initial State */}
       {!caseId && !loadingCases && !message && (
         <div className="bg-[#111827] border border-slate-800

@@ -1,12 +1,24 @@
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from database import init_db, get_connection
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(
     title="AI-COURTROOM",
     description="AI-powered courtroom analysis system",
     version="1.0.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://127.0.0.1:5173",
+        "http://localhost:5173"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -372,6 +384,7 @@ async def upload_evidence(
 
     finally:
         await file.close()
+
 @app.get("/cases/{case_id}/evidence")
 def get_case_evidence(case_id: int):
     with get_connection() as conn:
@@ -380,7 +393,10 @@ def get_case_evidence(case_id: int):
         ).fetchone()
 
         if case is None:
-            raise HTTPException(status_code=404, detail="Case not found")
+            raise HTTPException(
+                status_code=404,
+                detail="Case not found"
+            )
 
         evidence = conn.execute(
             """
@@ -389,10 +405,11 @@ def get_case_evidence(case_id: int):
             FROM evidence
             WHERE case_id = ?
             """,
-            (evidence_id,)
-        ).fetchone()
+            (case_id,)
+        ).fetchall()
 
     return [dict(item) for item in evidence]
+
 @app.get("/evidence/{evidence_id}/integrity")
 def verify_evidence_integrity(evidence_id: int):
 
