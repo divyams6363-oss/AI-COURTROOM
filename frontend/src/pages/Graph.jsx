@@ -1,8 +1,5 @@
-
-import { useCallback, useEffect, useRef, useState } from "react";
-
-import {
-  ReactFlow,
+import { useEffect, useState } from "react";
+import ReactFlow, {
   Background,
   Controls,
   MiniMap,
@@ -71,398 +68,49 @@ const nodeTypes = {
 
 export default function Graph() {
   const [cases, setCases] = useState([]);
-  const [selectedCaseId, setSelectedCaseId] = useState("");
+  const [caseId, setCaseId] = useState("");
+  const [graph, setGraph] = useState({
+    nodes: [],
+    edges: []
+  });
 
-  const [nodes, setNodes] = useState([]);
-  const [edges, setEdges] = useState([]);
-
-  const [selectedEvidence, setSelectedEvidence] = useState(null);
-
-  const [loadingCases, setLoadingCases] = useState(true);
-  const [loadingEvidence, setLoadingEvidence] = useState(false);
-
-  const [error, setError] = useState("");
-  const [evidenceError, setEvidenceError] = useState("");
-
-  const requestNumber = useRef(0);
-
-  // Load cases from backend.
   useEffect(() => {
-    let active = true;
-
-    const loadCases = async () => {
-      setLoadingCases(true);
-      setError("");
-
-      try {
-        const response = await api.get("/cases");
-        const caseList = getArray(response.data, "cases");
-
-        const validCases = caseList.filter(
-          (item) =>
-            item &&
-            (item.id !== undefined || item.case_id !== undefined)
-        );
-
-        if (!active) return;
-
-        setCases(validCases);
-
-        setSelectedCaseId((currentId) => {
-          const exists = validCases.some(
-            (item) =>
-              String(item.id ?? item.case_id) === currentId
-          );
-
-          if (exists) return currentId;
-
-          return validCases.length
-            ? String(validCases[0].id ?? validCases[0].case_id)
-            : "";
-        });
-      } catch (err) {
-        console.error("Cases loading error:", err);
-
-        if (!active) return;
-
-        setError(
-          "Unable to load cases. Please check the backend connection."
-        );
-
-        setCases([]);
-        setSelectedCaseId("");
-      } finally {
-        if (active) setLoadingCases(false);
-      }
-    };
-
-    loadCases();
-
-    return () => {
-      active = false;
-    };
+    api.get("/cases")
+      .then(res => setCases(res.data))
+      .catch(console.error);
   }, []);
 
-  // Load evidence for the selected case.
-  useEffect(() => {
-    const currentRequest = ++requestNumber.current;
+  async function loadGraph(id) {
+    setCaseId(id);
 
-    const loadEvidence = async () => {
-      setNodes([]);
-      setEdges([]);
-      setSelectedEvidence(null);
-      setEvidenceError("");
+    try {
+      const response = await api.get(`/cases/${id}/graph`);
 
-      if (!selectedCaseId) {
-        setLoadingEvidence(false);
-        return;
-      }
-
-      setLoadingEvidence(true);
-
-      try {
-        const response = await api.get(
-          `/cases/${encodeURIComponent(selectedCaseId)}/evidence`
-        );
-
-        if (currentRequest !== requestNumber.current) return;
-
-        const evidenceList = getArray(response.data, "evidence");
-
-        const selectedCase = cases.find(
-          (item) =>
-            String(item.id ?? item.case_id) === selectedCaseId
-        );
-
-        const caseTitle = selectedCase?.title || "Investigation Case";
-
-        const caseNode = {
-          id: "case-root",
-          type: "default",
-          position: { x: 280, y: 30 },
-          data: {
-            label: (
-              <div className="px-3 py-2 text-center">
-                <div className="text-xs text-blue-300">
-                  INVESTIGATION CASE
-                </div>
-
-                <div className="mt-1 max-w-[220px] truncate font-semibold text-white">
-                  {caseTitle}
-                </div>
-
-                <div className="mt-1 text-xs text-slate-400">
-                  Case ID: {selectedCaseId}
-                </div>
-              </div>
-            )
-          },
-          style: {
-            background: "#172554",
-            border: "1px solid #3b82f6",
-            borderRadius: "12px",
-            color: "white",
-            padding: "8px",
-            width: "260px"
-          },
-          sourcePosition: Position.Bottom
-        };
-
-        const evidenceNodes = evidenceList.map((item, index) => {
-          const evidenceId = item.id ?? item.evidence_id ?? index;
-
-          return {
-            id: `evidence-${evidenceId}`,
-            type: "evidenceNode",
-            position: {
-              x: 40 + (index % 3) * 290,
-              y: 210 + Math.floor(index / 3) * 190
-            },
-            data: {
-              evidenceId,
-              filename: item.filename || `Evidence ${index + 1}`,
-              fileType: item.file_type || "Unknown",
-              fileSize: item.file_size,
-              sha256: item.sha256,
-              uploadedAt: item.uploaded_at,
-              caseId: selectedCaseId
-            }
-          };
-        });
-
-        const evidenceEdges = evidenceNodes.map((node) => ({
-          id: `contains-${node.id}`,
-          source: "case-root",
-          target: node.id,
-          label: "CONTAINS",
-          type: "smoothstep",
-          style: { stroke: "#64748b" },
-          labelStyle: { fill: "#94a3b8", fontSize: 11 }
-        }));
-
-        setNodes([caseNode, ...evidenceNodes]);
-        setEdges(evidenceEdges);
-      } catch (err) {
-        if (currentRequest !== requestNumber.current) return;
-
-        console.error("Evidence loading error:", err);
-
-        setEvidenceError(
-          "Unable to load evidence for this case. Check the backend evidence endpoint."
-        );
-      } finally {
-        if (currentRequest === requestNumber.current) {
-          setLoadingEvidence(false);
-        }
-      }
-    };
-
-    loadEvidence();
-
-    return () => {
-      if (requestNumber.current === currentRequest) {
-        requestNumber.current++;
-      }
-    };
-  }, [selectedCaseId, cases]);
-
-  // Handle node changes without applyNodeChanges.
-  
-const onNodesChange = useCallback((changes) => {
-  if (!Array.isArray(changes)) return;
-
-  setNodes((currentNodes) => {
-    let updatedNodes = [...currentNodes];
-
-    changes.forEach((change) => {
-      if (change.type === "remove") {
-        updatedNodes = updatedNodes.filter(
-          (node) => node.id !== change.id
-        );
-      }
-
-      if (change.type === "select") {
-        updatedNodes = updatedNodes.map((node) =>
-          node.id === change.id
-            ? { ...node, selected: change.selected }
-            : node
-        );
-      }
-
-      if (change.type === "position") {
-        updatedNodes = updatedNodes.map((node) =>
-          node.id === change.id
-            ? {
-                ...node,
-                position: change.position || node.position,
-                dragging: change.dragging
-              }
-            : node
-        );
-      }
-
-      if (change.type === "dimensions") {
-        updatedNodes = updatedNodes.map((node) =>
-          node.id === change.id
-            ? {
-                ...node,
-                measured: change.dimensions || node.measured
-              }
-            : node
-        );
-      }
-
-      if (change.type === "replace") {
-        updatedNodes = updatedNodes.map((node) =>
-          node.id === change.id ? change.item : node
-        );
-      }
-
-      if (change.type === "add") {
-        updatedNodes.splice(
-          change.index ?? updatedNodes.length,
-          0,
-          change.item
-        );
-      }
-    });
-
-    return updatedNodes;
-  });
-}, []);
-
-const onEdgesChange = useCallback((changes) => {
-  if (!Array.isArray(changes)) return;
-
-  setEdges((currentEdges) => {
-    let updatedEdges = [...currentEdges];
-
-    changes.forEach((change) => {
-      if (change.type === "remove") {
-        updatedEdges = updatedEdges.filter(
-          (edge) => edge.id !== change.id
-        );
-      }
-
-      if (change.type === "select") {
-        updatedEdges = updatedEdges.map((edge) =>
-          edge.id === change.id
-            ? { ...edge, selected: change.selected }
-            : edge
-        );
-      }
-
-      if (change.type === "replace") {
-        updatedEdges = updatedEdges.map((edge) =>
-          edge.id === change.id ? change.item : edge
-        );
-      }
-
-      if (change.type === "add") {
-        updatedEdges.splice(
-          change.index ?? updatedEdges.length,
-          0,
-          change.item
-        );
-      }
-    });
-
-    return updatedEdges;
-  });
-}, []);
-
-  // Create temporary manual relationships.
-  const onConnect = useCallback((connection) => {
-    setEdges((currentEdges) => [
-      ...currentEdges,
-      {
-        ...connection,
-        id: `manual-${Date.now()}-${currentEdges.length}`,
-        type: "smoothstep",
-        label: "MANUAL RELATION",
-        style: {
-          stroke: "#a78bfa",
-          strokeWidth: 2
-        },
-        labelStyle: {
-          fill: "#c4b5fd",
-          fontSize: 10
-        }
-      }
-    ]);
-  }, []);
-
-  const handleNodeClick = useCallback((event, node) => {
-    if (node.type === "evidenceNode") {
-      setSelectedEvidence(node.data);
-    } else {
-      setSelectedEvidence(null);
+      setGraph({
+        nodes: response.data.nodes || [],
+        edges: response.data.edges || []
+      });
+    } catch (error) {
+      console.error(error);
     }
-  }, []);
-
-  const evidenceCount = nodes.filter(
-    (node) => node.type === "evidenceNode"
-  ).length;
-
-  const relationshipCount = edges.filter(
-    (edge) => edge.label !== "CONTAINS"
-  ).length;
-
-  const selectedCase = cases.find(
-    (item) =>
-      String(item.id ?? item.case_id) === selectedCaseId
-  );
+  }
 
   return (
     <div className="space-y-6 text-white">
 
-      {/* Heading */}
-      <div>
-        <h1 className="text-2xl font-bold">
-          Evidence Graph
-        </h1>
+      <h1 className="text-3xl font-bold">Evidence Graph</h1>
 
-        <p className="mt-1 text-sm text-slate-400">
-          Explore evidence files connected to an investigation case.
-        </p>
-      </div>
-
-      {/* Case selector */}
-      <div className="rounded-xl border border-slate-700 bg-slate-900 p-5">
-        <label
-          htmlFor="graph-case-select"
-          className="mb-2 block text-sm font-medium text-slate-300"
-        >
-          Select Investigating Case
-        </label>
-
-        <select
-          id="graph-case-select"
-          value={selectedCaseId}
-          onChange={(event) => {
-            setSelectedCaseId(event.target.value);
-          }}
-          disabled={loadingCases || cases.length === 0}
-          className="w-full rounded-lg border border-slate-600 bg-slate-800 px-4 py-3 text-sm text-white outline-none focus:border-blue-500 disabled:opacity-60"
-        >
-          <option value="">
-            {loadingCases
-              ? "Loading cases..."
-              : cases.length === 0
-                ? "No cases available"
-                : "Select a case"}
-          </option>
-
-          {cases.map((item) => {
-            const id = String(item.id ?? item.case_id);
-
-            return (
-              <option key={id} value={id}>
-                {item.title || `Case ${id}`} — ID: {id}
-              </option>
-            );
-          })}
-        </select>
+      <select
+        value={caseId}
+        onChange={e => loadGraph(e.target.value)}
+        className="bg-slate-900 border border-slate-700
+        p-3 rounded-lg w-full"
+      >
+        <option value="">Select a case</option>
+        {cases.map(c => (
+          <option key={c.id} value={c.id}>{c.title}</option>
+        ))}
+      </select>
 
         {selectedCase && (
           <p className="mt-2 text-xs text-slate-400">
