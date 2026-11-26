@@ -1,7 +1,7 @@
 
 import { useEffect, useState } from "react";
 import api from "../services/api";
-
+import { CalendarDays } from "lucide-react";
 export default function Timeline() {
   const [cases, setCases] = useState([]);
   const [caseId, setCaseId] = useState("");
@@ -70,8 +70,7 @@ export default function Timeline() {
 
       </div>
 
-        </div>
-      )}
+      
 
       {/* Initial State */}
       {!caseId && !loadingCases && !message && (
